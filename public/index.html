@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Screen Sharing App</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="container">
+        <div id="login-screen" class="screen active">
+            <h1>Online Tutoring - Screen Share</h1>
+            <div class="login-form">
+                <input type="text" id="userName" placeholder="Enter your name" required>
+                <input type="text" id="roomId" placeholder="Room ID (optional for tutors)">
+                <div class="user-type">
+                    <label>
+                        <input type="radio" name="userType" value="student" checked>
+                        Student
+                    </label>
+                    <label>
+                        <input type="radio" name="userType" value="tutor">
+                        Tutor
+                    </label>
+                </div>
+                <button id="joinBtn">Join Room</button>
+            </div>
+        </div>
+
+        <div id="student-screen" class="screen">
+            <div class="header">
+                <h2>Student View - <span id="studentName"></span></h2>
+                <div class="controls">
+                    <button id="shareScreenBtn" class="btn-primary">Share Screen</button>
+                    <button id="stopSharingBtn" class="btn-secondary" style="display: none;">Stop Sharing</button>
+                    <button id="leaveRoomBtn" class="btn-danger">Leave Room</button>
+                </div>
+            </div>
+            <div class="content">
+                <div id="connectionStatus" class="status">Connecting to room...</div>
+                <video id="localVideo" autoplay muted style="display: none;"></video>
+            </div>
+        </div>
+
+        <div id="tutor-screen" class="screen">
+            <div class="header">
+                <h2>Tutor Dashboard - <span id="tutorName"></span></h2>
+                <div class="controls">
+                    <span id="roomIdDisplay">Room ID: <strong></strong></span>
+                    <button id="tutorLeaveBtn" class="btn-danger">Leave Room</button>
+                </div>
+            </div>
+            <div class="content">
+                <div id="tutorStatus" class="status">Waiting for students...</div>
+                <div id="studentStreams" class="streams-grid"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
