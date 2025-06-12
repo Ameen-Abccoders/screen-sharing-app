@@ -158,6 +158,9 @@ class ScreenSharingApp {
                 this.stopScreenShare();
             });
 
+            // Create peer connections with tutor
+            await this.initiatePeerConnections();
+
         } catch (error) {
             console.error('Error starting screen share:', error);
             alert('Failed to start screen sharing. Please check permissions.');
@@ -225,8 +228,8 @@ class ScreenSharingApp {
             streamDiv.querySelector('.stream-status').className = 'stream-status sharing';
         }
 
-        // Create peer connection for receiving stream
-        await this.createPeerConnection(data.studentId, false);
+        // For tutors: wait for WebRTC offer from student
+        // The peer connection will be created when we receive the offer
     }
 
     handleStudentScreenShareStopped(data) {
@@ -292,6 +295,14 @@ class ScreenSharingApp {
         }
 
         return peerConnection;
+    }
+
+    async initiatePeerConnections() {
+        // This is called by students to initiate connections with tutor
+        if (this.userType === 'student' && this.localStream) {
+            // Create peer connection with tutor
+            await this.createPeerConnection('tutor', true);
+        }
     }
 
     async handleWebRTCOffer(data) {

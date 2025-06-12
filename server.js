@@ -86,10 +86,22 @@ io.on('connection', (socket) => {
   });
 
   socket.on('webrtc-offer', (data) => {
-    socket.to(data.target).emit('webrtc-offer', {
-      offer: data.offer,
-      sender: socket.id
-    });
+    const room = rooms.get(socket.roomId);
+    if (room) {
+      if (data.target === 'tutor' && room.tutor) {
+        // Student sending offer to tutor
+        io.to(room.tutor).emit('webrtc-offer', {
+          offer: data.offer,
+          sender: socket.id
+        });
+      } else {
+        // Direct targeting
+        socket.to(data.target).emit('webrtc-offer', {
+          offer: data.offer,
+          sender: socket.id
+        });
+      }
+    }
   });
 
   socket.on('webrtc-answer', (data) => {
@@ -100,10 +112,19 @@ io.on('connection', (socket) => {
   });
 
   socket.on('webrtc-ice-candidate', (data) => {
-    socket.to(data.target).emit('webrtc-ice-candidate', {
-      candidate: data.candidate,
-      sender: socket.id
-    });
+    const room = rooms.get(socket.roomId);
+    if (room && data.target === 'tutor' && room.tutor) {
+      // Student sending ICE candidate to tutor
+      io.to(room.tutor).emit('webrtc-ice-candidate', {
+        candidate: data.candidate,
+        sender: socket.id
+      });
+    } else {
+      socket.to(data.target).emit('webrtc-ice-candidate', {
+        candidate: data.candidate,
+        sender: socket.id
+      });
+    }
   });
 
   socket.on('disconnect', () => {
