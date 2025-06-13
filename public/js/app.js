@@ -270,35 +270,46 @@ class ScreenSharingApp {
             
             // For tutors receiving from students, use the peerId (student's socket ID)
             // For students, this won't be used since they don't receive streams
-            let streamDiv;
             if (this.userType === 'tutor') {
-                streamDiv = document.getElementById(`stream-${peerId}`);
-            }
-            
-            if (streamDiv) {
-                const video = streamDiv.querySelector('video');
-                video.srcObject = remoteStream;
-                
-                // Add event listeners to debug video
-                video.onloadedmetadata = () => {
-                    console.log('Video metadata loaded for', peerId, 'dimensions:', video.videoWidth, 'x', video.videoHeight);
+                const setStreamToVideo = () => {
+                    const streamDiv = document.getElementById(`stream-${peerId}`);
+                    if (streamDiv) {
+                        const video = streamDiv.querySelector('video');
+                        video.srcObject = remoteStream;
+                        
+                        // Add event listeners to debug video
+                        video.onloadedmetadata = () => {
+                            console.log('Video metadata loaded for', peerId, 'dimensions:', video.videoWidth, 'x', video.videoHeight);
+                        };
+                        video.onplaying = () => {
+                            console.log('Video started playing for', peerId);
+                        };
+                        video.onerror = (e) => {
+                            console.error('Video error for', peerId, e);
+                        };
+                        
+                        // Force play if needed
+                        video.play().catch(e => console.log('Auto-play prevented:', e));
+                        
+                        console.log('Set remote stream to video element for', peerId);
+                        return true;
+                    }
+                    return false;
                 };
-                video.onplaying = () => {
-                    console.log('Video started playing for', peerId);
-                };
-                video.onerror = (e) => {
-                    console.error('Video error for', peerId, e);
-                };
-                
-                // Force play if needed
-                video.play().catch(e => console.log('Auto-play prevented:', e));
-                
-                console.log('Set remote stream to video element for', peerId);
-            } else {
-                console.error('Stream div not found for', peerId, 'userType:', this.userType);
-                // Debug: list all available stream divs
-                const allStreamDivs = document.querySelectorAll('[id^="stream-"]');
-                console.log('Available stream divs:', Array.from(allStreamDivs).map(div => div.id));
+
+                // Try to set stream immediately
+                if (!setStreamToVideo()) {
+                    console.log('Stream div not found yet, retrying in 500ms for', peerId);
+                    // If not found, wait a bit and try again (student might still be joining)
+                    setTimeout(() => {
+                        if (!setStreamToVideo()) {
+                            console.error('Stream div still not found after retry for', peerId);
+                            // Debug: list all available stream divs
+                            const allStreamDivs = document.querySelectorAll('[id^="stream-"]');
+                            console.log('Available stream divs:', Array.from(allStreamDivs).map(div => div.id));
+                        }
+                    }, 500);
+                }
             }
         };
 
