@@ -201,7 +201,7 @@ class ScreenSharingApp {
         
         streamDiv.innerHTML = `
             <h3>${name}</h3>
-            <video autoplay playsinline muted controls></video>
+            <video autoplay playsinline controls></video>
             <div class="stream-status not-sharing">Not sharing screen</div>
         `;
 
@@ -280,6 +280,17 @@ class ScreenSharingApp {
                         // Add event listeners to debug video
                         video.onloadedmetadata = () => {
                             console.log('Video metadata loaded for', peerId, 'dimensions:', video.videoWidth, 'x', video.videoHeight);
+                            // Try to play when metadata is loaded
+                            video.play().catch(e => {
+                                console.log('Auto-play prevented, will try manual interaction:', e);
+                                // Remove muted and add click handler for manual play
+                                video.muted = false;
+                                video.addEventListener('click', () => {
+                                    video.play().then(() => {
+                                        console.log('Video playing after manual click');
+                                    });
+                                }, { once: true });
+                            });
                         };
                         video.onplaying = () => {
                             console.log('Video started playing for', peerId);
@@ -287,9 +298,12 @@ class ScreenSharingApp {
                         video.onerror = (e) => {
                             console.error('Video error for', peerId, e);
                         };
-                        
-                        // Force play if needed
-                        video.play().catch(e => console.log('Auto-play prevented:', e));
+                        video.onloadstart = () => {
+                            console.log('Video load start for', peerId);
+                        };
+                        video.oncanplay = () => {
+                            console.log('Video can play for', peerId);
+                        };
                         
                         console.log('Set remote stream to video element for', peerId);
                         return true;
