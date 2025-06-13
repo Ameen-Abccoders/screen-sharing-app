@@ -205,8 +205,10 @@ button {
 
 .student-stream video {
     width: 100%;
+    height: 200px;
     border-radius: 6px;
     background: #000;
+    object-fit: contain;
 }
 
 .stream-status {

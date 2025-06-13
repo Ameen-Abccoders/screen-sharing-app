@@ -201,7 +201,7 @@ class ScreenSharingApp {
         
         streamDiv.innerHTML = `
             <h3>${name}</h3>
-            <video autoplay></video>
+            <video autoplay playsinline muted controls></video>
             <div class="stream-status not-sharing">Not sharing screen</div>
         `;
 
@@ -271,6 +271,21 @@ class ScreenSharingApp {
             if (streamDiv) {
                 const video = streamDiv.querySelector('video');
                 video.srcObject = remoteStream;
+                
+                // Add event listeners to debug video
+                video.onloadedmetadata = () => {
+                    console.log('Video metadata loaded for', peerId, 'dimensions:', video.videoWidth, 'x', video.videoHeight);
+                };
+                video.onplaying = () => {
+                    console.log('Video started playing for', peerId);
+                };
+                video.onerror = (e) => {
+                    console.error('Video error for', peerId, e);
+                };
+                
+                // Force play if needed
+                video.play().catch(e => console.log('Auto-play prevented:', e));
+                
                 console.log('Set remote stream to video element for', peerId);
             } else {
                 console.error('Stream div not found for', peerId);
