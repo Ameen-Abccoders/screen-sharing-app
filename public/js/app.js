@@ -275,6 +275,16 @@ class ScreenSharingApp {
                     const streamDiv = document.getElementById(`stream-${peerId}`);
                     if (streamDiv) {
                         const video = streamDiv.querySelector('video');
+                        
+                        // Debug the stream before setting it
+                        console.log('Stream details for', peerId);
+                        console.log('Stream active:', remoteStream.active);
+                        console.log('Video tracks:', remoteStream.getVideoTracks());
+                        console.log('Audio tracks:', remoteStream.getAudioTracks());
+                        remoteStream.getVideoTracks().forEach((track, index) => {
+                            console.log(`Video track ${index}:`, track.label, 'enabled:', track.enabled, 'readyState:', track.readyState);
+                        });
+                        
                         video.srcObject = remoteStream;
                         
                         // Add event listeners to debug video
