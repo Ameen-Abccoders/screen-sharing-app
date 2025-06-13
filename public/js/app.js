@@ -132,6 +132,7 @@ class ScreenSharingApp {
     updateUI() {
         if (this.userType === 'student') {
             document.getElementById('studentName').textContent = this.userName;
+            this.updateStatus(`Connected to room ${this.roomId}`);
         } else {
             document.getElementById('tutorName').textContent = this.userName;
             this.roomIdDisplay.querySelector('strong').textContent = this.roomId;
@@ -153,6 +154,7 @@ class ScreenSharingApp {
 
             console.log('Screen sharing started, local stream:', this.localStream);
 
+            this.updateStatus('Screen sharing active');
             this.socket.emit('start-screen-share');
 
             // Handle stream ending
@@ -181,6 +183,7 @@ class ScreenSharingApp {
         this.shareScreenBtn.style.display = 'inline-block';
         this.stopSharingBtn.style.display = 'none';
 
+        this.updateStatus(`Connected to room ${this.roomId}`);
         this.socket.emit('stop-screen-share');
 
         // Close all peer connections
