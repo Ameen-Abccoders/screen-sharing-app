@@ -151,6 +151,8 @@ class ScreenSharingApp {
             this.shareScreenBtn.style.display = 'none';
             this.stopSharingBtn.style.display = 'inline-block';
 
+            console.log('Screen sharing started, local stream:', this.localStream);
+
             this.socket.emit('start-screen-share');
 
             // Handle stream ending
@@ -158,8 +160,10 @@ class ScreenSharingApp {
                 this.stopScreenShare();
             });
 
-            // Create peer connections with tutor
-            await this.initiatePeerConnections();
+            // Wait a bit for the tutor to be notified, then initiate connection
+            setTimeout(async () => {
+                await this.initiatePeerConnections();
+            }, 1000);
 
         } catch (error) {
             console.error('Error starting screen share:', error);
@@ -249,6 +253,8 @@ class ScreenSharingApp {
     }
 
     async createPeerConnection(peerId, isInitiator) {
+        console.log(`Creating peer connection with ${peerId}, isInitiator: ${isInitiator}`);
+        
         const peerConnection = new RTCPeerConnection({
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' }
@@ -259,16 +265,22 @@ class ScreenSharingApp {
 
         // Handle incoming stream
         peerConnection.ontrack = (event) => {
+            console.log('Received remote stream from', peerId, event.streams);
             const [remoteStream] = event.streams;
             const streamDiv = document.getElementById(`stream-${peerId}`);
             if (streamDiv) {
-                streamDiv.querySelector('video').srcObject = remoteStream;
+                const video = streamDiv.querySelector('video');
+                video.srcObject = remoteStream;
+                console.log('Set remote stream to video element for', peerId);
+            } else {
+                console.error('Stream div not found for', peerId);
             }
         };
 
         // Handle ICE candidates
         peerConnection.onicecandidate = (event) => {
             if (event.candidate) {
+                console.log('Sending ICE candidate to', peerId);
                 this.socket.emit('webrtc-ice-candidate', {
                     target: peerId,
                     candidate: event.candidate
@@ -276,15 +288,23 @@ class ScreenSharingApp {
             }
         };
 
+        // Handle connection state changes
+        peerConnection.onconnectionstatechange = () => {
+            console.log(`Connection state with ${peerId}:`, peerConnection.connectionState);
+        };
+
         // Add local stream if available (for students)
         if (this.localStream && isInitiator) {
+            console.log('Adding local stream tracks to peer connection');
             this.localStream.getTracks().forEach(track => {
+                console.log('Adding track:', track.kind, track.label);
                 peerConnection.addTrack(track, this.localStream);
             });
         }
 
         // Create offer if initiator (student)
         if (isInitiator) {
+            console.log('Creating offer for', peerId);
             const offer = await peerConnection.createOffer();
             await peerConnection.setLocalDescription(offer);
             
@@ -292,6 +312,7 @@ class ScreenSharingApp {
                 target: peerId,
                 offer: offer
             });
+            console.log('Sent offer to', peerId);
         }
 
         return peerConnection;
@@ -306,6 +327,7 @@ class ScreenSharingApp {
     }
 
     async handleWebRTCOffer(data) {
+        console.log('Received WebRTC offer from', data.sender);
         const peerConnection = await this.createPeerConnection(data.sender, false);
         
         await peerConnection.setRemoteDescription(data.offer);
@@ -316,19 +338,28 @@ class ScreenSharingApp {
             target: data.sender,
             answer: answer
         });
+        console.log('Sent WebRTC answer to', data.sender);
     }
 
     async handleWebRTCAnswer(data) {
+        console.log('Received WebRTC answer from', data.sender);
         const peerConnection = this.peerConnections.get(data.sender);
         if (peerConnection) {
             await peerConnection.setRemoteDescription(data.answer);
+            console.log('Set remote description from answer');
+        } else {
+            console.error('No peer connection found for', data.sender);
         }
     }
 
     async handleICECandidate(data) {
+        console.log('Received ICE candidate from', data.sender);
         const peerConnection = this.peerConnections.get(data.sender);
         if (peerConnection) {
             await peerConnection.addIceCandidate(data.candidate);
+            console.log('Added ICE candidate');
+        } else {
+            console.error('No peer connection found for ICE candidate from', data.sender);
         }
     }
 
