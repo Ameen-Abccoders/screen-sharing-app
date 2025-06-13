@@ -85,46 +85,33 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('webrtc-offer', (data) => {
+  // Simplified WebRTC signaling
+  socket.on('offer', (data) => {
     const room = rooms.get(socket.roomId);
-    if (room) {
-      if (data.target === 'tutor' && room.tutor) {
-        // Student sending offer to tutor
-        io.to(room.tutor).emit('webrtc-offer', {
-          offer: data.offer,
-          sender: socket.id
-        });
-      } else {
-        // Direct targeting
-        socket.to(data.target).emit('webrtc-offer', {
-          offer: data.offer,
-          sender: socket.id
-        });
-      }
+    if (room && room.tutor && socket.userType === 'student') {
+      // Student sending offer to tutor
+      io.to(room.tutor).emit('offer', {
+        offer: data.offer,
+        studentId: socket.id
+      });
     }
   });
 
-  socket.on('webrtc-answer', (data) => {
-    socket.to(data.target).emit('webrtc-answer', {
-      answer: data.answer,
-      sender: socket.id
+  socket.on('answer', (data) => {
+    const room = rooms.get(socket.roomId);
+    if (room && socket.userType === 'tutor') {
+      // Tutor sending answer to student
+      socket.broadcast.to(socket.roomId).emit('answer', {
+        answer: data.answer
+      });
+    }
+  });
+
+  socket.on('ice-candidate', (data) => {
+    // Broadcast ICE candidate to other users in the room
+    socket.broadcast.to(socket.roomId).emit('ice-candidate', {
+      candidate: data.candidate
     });
-  });
-
-  socket.on('webrtc-ice-candidate', (data) => {
-    const room = rooms.get(socket.roomId);
-    if (room && data.target === 'tutor' && room.tutor) {
-      // Student sending ICE candidate to tutor
-      io.to(room.tutor).emit('webrtc-ice-candidate', {
-        candidate: data.candidate,
-        sender: socket.id
-      });
-    } else {
-      socket.to(data.target).emit('webrtc-ice-candidate', {
-        candidate: data.candidate,
-        sender: socket.id
-      });
-    }
   });
 
   socket.on('disconnect', () => {

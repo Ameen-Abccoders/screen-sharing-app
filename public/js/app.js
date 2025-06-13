@@ -4,8 +4,8 @@ class ScreenSharingApp {
         this.userType = null;
         this.userName = null;
         this.roomId = null;
+        this.webrtc = null;
         this.localStream = null;
-        this.peerConnections = new Map();
         
         this.initializeElements();
         this.bindEvents();
@@ -55,10 +55,6 @@ class ScreenSharingApp {
     }
 
     setupSocketListeners() {
-        this.socket.on('tutor-joined', () => {
-            this.updateStatus('Tutor has joined the room');
-        });
-
         this.socket.on('student-joined', (data) => {
             this.addStudentToGrid(data.studentId, data.name);
         });
@@ -75,16 +71,30 @@ class ScreenSharingApp {
             this.handleStudentScreenShareStopped(data);
         });
 
-        this.socket.on('webrtc-offer', async (data) => {
-            await this.handleWebRTCOffer(data);
+        // Simplified WebRTC signaling
+        this.socket.on('offer', async (data) => {
+            console.log('Received offer from student:', data.studentId);
+            if (this.userType === 'tutor' && !this.webrtc) {
+                this.webrtc = new SimpleWebRTC(this.socket, false);
+                this.webrtc.onRemoteStream = (stream) => {
+                    this.handleRemoteStream(stream, data.studentId);
+                };
+                await this.webrtc.handleOffer(data.offer);
+            }
         });
 
-        this.socket.on('webrtc-answer', async (data) => {
-            await this.handleWebRTCAnswer(data);
+        this.socket.on('answer', async (data) => {
+            console.log('Received answer');
+            if (this.webrtc) {
+                await this.webrtc.handleAnswer(data.answer);
+            }
         });
 
-        this.socket.on('webrtc-ice-candidate', async (data) => {
-            await this.handleICECandidate(data);
+        this.socket.on('ice-candidate', async (data) => {
+            console.log('Received ICE candidate');
+            if (this.webrtc) {
+                await this.webrtc.handleIceCandidate(data.candidate);
+            }
         });
     }
 
@@ -142,7 +152,7 @@ class ScreenSharingApp {
     async startScreenShare() {
         try {
             this.localStream = await navigator.mediaDevices.getDisplayMedia({
-                video: { mediaSource: 'screen' },
+                video: true,
                 audio: true
             });
 
@@ -152,8 +162,6 @@ class ScreenSharingApp {
             this.shareScreenBtn.style.display = 'none';
             this.stopSharingBtn.style.display = 'inline-block';
 
-            console.log('Screen sharing started, local stream:', this.localStream);
-
             this.updateStatus('Screen sharing active');
             this.socket.emit('start-screen-share');
 
@@ -162,10 +170,9 @@ class ScreenSharingApp {
                 this.stopScreenShare();
             });
 
-            // Wait a bit for the tutor to be notified, then initiate connection
-            setTimeout(async () => {
-                await this.initiatePeerConnections();
-            }, 1000);
+            // Create WebRTC connection
+            this.webrtc = new SimpleWebRTC(this.socket, true);
+            await this.webrtc.addLocalStream(this.localStream);
 
         } catch (error) {
             console.error('Error starting screen share:', error);
@@ -179,22 +186,17 @@ class ScreenSharingApp {
             this.localStream = null;
         }
 
+        if (this.webrtc) {
+            this.webrtc.close();
+            this.webrtc = null;
+        }
+
         this.localVideo.style.display = 'none';
         this.shareScreenBtn.style.display = 'inline-block';
         this.stopSharingBtn.style.display = 'none';
 
         this.updateStatus(`Connected to room ${this.roomId}`);
         this.socket.emit('stop-screen-share');
-
-        // Close all peer connections
-        this.peerConnections.forEach(pc => pc.close());
-        this.peerConnections.clear();
-    }
-
-    leaveRoom() {
-        this.stopScreenShare();
-        this.socket.disconnect();
-        location.reload();
     }
 
     addStudentToGrid(studentId, name) {
@@ -204,7 +206,7 @@ class ScreenSharingApp {
         
         streamDiv.innerHTML = `
             <h3>${name}</h3>
-            <video autoplay playsinline controls></video>
+            <video autoplay playsinline></video>
             <div class="stream-status not-sharing">Not sharing screen</div>
         `;
 
@@ -217,26 +219,16 @@ class ScreenSharingApp {
         if (streamDiv) {
             streamDiv.remove();
         }
-
-        // Clean up peer connection
-        if (this.peerConnections.has(studentId)) {
-            this.peerConnections.get(studentId).close();
-            this.peerConnections.delete(studentId);
-        }
-
         this.updateTutorStatus();
     }
 
-    async handleStudentScreenShareStarted(data) {
+    handleStudentScreenShareStarted(data) {
         const streamDiv = document.getElementById(`stream-${data.studentId}`);
         if (streamDiv) {
             streamDiv.classList.add('sharing');
             streamDiv.querySelector('.stream-status').textContent = 'Sharing screen';
             streamDiv.querySelector('.stream-status').className = 'stream-status sharing';
         }
-
-        // For tutors: wait for WebRTC offer from student
-        // The peer connection will be created when we receive the offer
     }
 
     handleStudentScreenShareStopped(data) {
@@ -247,214 +239,18 @@ class ScreenSharingApp {
             streamDiv.querySelector('.stream-status').className = 'stream-status not-sharing';
             streamDiv.querySelector('video').srcObject = null;
         }
-
-        // Close peer connection
-        if (this.peerConnections.has(data.studentId)) {
-            this.peerConnections.get(data.studentId).close();
-            this.peerConnections.delete(data.studentId);
-        }
     }
 
-    async createPeerConnection(peerId, isInitiator) {
-        console.log(`Creating peer connection with ${peerId}, isInitiator: ${isInitiator}`);
-        
-        const peerConnection = new RTCPeerConnection({
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun2.l.google.com:19302' },
-                { urls: 'stun:stun.cloudflare.com:3478' }
-            ],
-            iceCandidatePoolSize: 10
-        });
-
-        this.peerConnections.set(peerId, peerConnection);
-
-        // Handle incoming stream
-        peerConnection.ontrack = (event) => {
-            console.log('Received remote stream from', peerId, event.streams);
-            const [remoteStream] = event.streams;
-            
-            // For tutors receiving from students, use the peerId (student's socket ID)
-            // For students, this won't be used since they don't receive streams
-            if (this.userType === 'tutor') {
-                const setStreamToVideo = () => {
-                    const streamDiv = document.getElementById(`stream-${peerId}`);
-                    if (streamDiv) {
-                        const video = streamDiv.querySelector('video');
-                        
-                        // Debug the stream before setting it
-                        console.log('Stream details for', peerId);
-                        console.log('Stream active:', remoteStream.active);
-                        console.log('Video tracks:', remoteStream.getVideoTracks());
-                        console.log('Audio tracks:', remoteStream.getAudioTracks());
-                        remoteStream.getVideoTracks().forEach((track, index) => {
-                            console.log(`Video track ${index}:`, track.label, 'enabled:', track.enabled, 'readyState:', track.readyState);
-                        });
-                        
-                        video.srcObject = remoteStream;
-                        
-                        // Add event listeners to debug video
-                        video.onloadedmetadata = () => {
-                            console.log('Video metadata loaded for', peerId, 'dimensions:', video.videoWidth, 'x', video.videoHeight);
-                            // Try to play when metadata is loaded
-                            video.play().catch(e => {
-                                console.log('Auto-play prevented, will try manual interaction:', e);
-                                // Remove muted and add click handler for manual play
-                                video.muted = false;
-                                video.addEventListener('click', () => {
-                                    video.play().then(() => {
-                                        console.log('Video playing after manual click');
-                                    });
-                                }, { once: true });
-                            });
-                        };
-                        video.onplaying = () => {
-                            console.log('Video started playing for', peerId);
-                        };
-                        video.onerror = (e) => {
-                            console.error('Video error for', peerId, e);
-                        };
-                        video.onloadstart = () => {
-                            console.log('Video load start for', peerId);
-                        };
-                        video.oncanplay = () => {
-                            console.log('Video can play for', peerId);
-                        };
-                        
-                        console.log('Set remote stream to video element for', peerId);
-                        return true;
-                    }
-                    return false;
-                };
-
-                // Try to set stream immediately
-                if (!setStreamToVideo()) {
-                    console.log('Stream div not found yet, retrying in 500ms for', peerId);
-                    // If not found, wait a bit and try again (student might still be joining)
-                    setTimeout(() => {
-                        if (!setStreamToVideo()) {
-                            console.error('Stream div still not found after retry for', peerId);
-                            // Debug: list all available stream divs
-                            const allStreamDivs = document.querySelectorAll('[id^="stream-"]');
-                            console.log('Available stream divs:', Array.from(allStreamDivs).map(div => div.id));
-                        }
-                    }, 500);
-                }
-            }
-        };
-
-        // Handle ICE candidates
-        peerConnection.onicecandidate = (event) => {
-            if (event.candidate) {
-                console.log('Sending ICE candidate to', peerId);
-                this.socket.emit('webrtc-ice-candidate', {
-                    target: peerId,
-                    candidate: event.candidate
-                });
-            }
-        };
-
-        // Handle connection state changes
-        peerConnection.onconnectionstatechange = () => {
-            console.log(`Connection state with ${peerId}:`, peerConnection.connectionState);
-            if (peerConnection.connectionState === 'failed') {
-                console.error('WebRTC connection failed for', peerId);
-                // Try to restart the connection
-                this.restartConnection(peerId, isInitiator);
-            } else if (peerConnection.connectionState === 'connected') {
-                console.log('WebRTC connection successful for', peerId);
-            }
-        };
-
-        // Handle ICE connection state
-        peerConnection.oniceconnectionstatechange = () => {
-            console.log(`ICE connection state with ${peerId}:`, peerConnection.iceConnectionState);
-        };
-
-        // Add local stream if available (for students)
-        if (this.localStream && isInitiator) {
-            console.log('Adding local stream tracks to peer connection');
-            this.localStream.getTracks().forEach(track => {
-                console.log('Adding track:', track.kind, track.label);
-                peerConnection.addTrack(track, this.localStream);
-            });
-        }
-
-        // Create offer if initiator (student)
-        if (isInitiator) {
-            console.log('Creating offer for', peerId);
-            const offer = await peerConnection.createOffer();
-            await peerConnection.setLocalDescription(offer);
-            
-            this.socket.emit('webrtc-offer', {
-                target: peerId,
-                offer: offer
-            });
-            console.log('Sent offer to', peerId);
-        }
-
-        return peerConnection;
-    }
-
-    async initiatePeerConnections() {
-        // This is called by students to initiate connections with tutor
-        if (this.userType === 'student' && this.localStream) {
-            // Create peer connection with tutor
-            await this.createPeerConnection('tutor', true);
-        }
-    }
-
-    async restartConnection(peerId, wasInitiator) {
-        console.log('Restarting connection with', peerId);
-        
-        // Close existing connection
-        if (this.peerConnections.has(peerId)) {
-            this.peerConnections.get(peerId).close();
-            this.peerConnections.delete(peerId);
-        }
-
-        // Wait a bit before retrying
-        setTimeout(async () => {
-            console.log('Retrying connection with', peerId);
-            await this.createPeerConnection(peerId, wasInitiator);
-        }, 2000);
-    }
-
-    async handleWebRTCOffer(data) {
-        console.log('Received WebRTC offer from', data.sender);
-        const peerConnection = await this.createPeerConnection(data.sender, false);
-        
-        await peerConnection.setRemoteDescription(data.offer);
-        const answer = await peerConnection.createAnswer();
-        await peerConnection.setLocalDescription(answer);
-
-        this.socket.emit('webrtc-answer', {
-            target: data.sender,
-            answer: answer
-        });
-        console.log('Sent WebRTC answer to', data.sender);
-    }
-
-    async handleWebRTCAnswer(data) {
-        console.log('Received WebRTC answer from', data.sender);
-        const peerConnection = this.peerConnections.get(data.sender);
-        if (peerConnection) {
-            await peerConnection.setRemoteDescription(data.answer);
-            console.log('Set remote description from answer');
+    handleRemoteStream(stream, studentId) {
+        console.log('Handling remote stream for student:', studentId);
+        const streamDiv = document.getElementById(`stream-${studentId}`);
+        if (streamDiv) {
+            const video = streamDiv.querySelector('video');
+            video.srcObject = stream;
+            video.play().catch(e => console.log('Autoplay prevented:', e));
+            console.log('Set stream to video for student:', studentId);
         } else {
-            console.error('No peer connection found for', data.sender);
-        }
-    }
-
-    async handleICECandidate(data) {
-        console.log('Received ICE candidate from', data.sender);
-        const peerConnection = this.peerConnections.get(data.sender);
-        if (peerConnection) {
-            await peerConnection.addIceCandidate(data.candidate);
-            console.log('Added ICE candidate');
-        } else {
-            console.error('No peer connection found for ICE candidate from', data.sender);
+            console.error('Stream div not found for student:', studentId);
         }
     }
 
@@ -474,6 +270,12 @@ class ScreenSharingApp {
         } else {
             statusEl.textContent = `${studentCount} student${studentCount > 1 ? 's' : ''} connected`;
         }
+    }
+
+    leaveRoom() {
+        this.stopScreenShare();
+        this.socket.disconnect();
+        location.reload();
     }
 
     generateRoomId() {
