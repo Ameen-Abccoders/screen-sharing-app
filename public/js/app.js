@@ -257,8 +257,12 @@ class ScreenSharingApp {
         
         const peerConnection = new RTCPeerConnection({
             iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' }
-            ]
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun.cloudflare.com:3478' }
+            ],
+            iceCandidatePoolSize: 10
         });
 
         this.peerConnections.set(peerId, peerConnection);
@@ -351,6 +355,18 @@ class ScreenSharingApp {
         // Handle connection state changes
         peerConnection.onconnectionstatechange = () => {
             console.log(`Connection state with ${peerId}:`, peerConnection.connectionState);
+            if (peerConnection.connectionState === 'failed') {
+                console.error('WebRTC connection failed for', peerId);
+                // Try to restart the connection
+                this.restartConnection(peerId, isInitiator);
+            } else if (peerConnection.connectionState === 'connected') {
+                console.log('WebRTC connection successful for', peerId);
+            }
+        };
+
+        // Handle ICE connection state
+        peerConnection.oniceconnectionstatechange = () => {
+            console.log(`ICE connection state with ${peerId}:`, peerConnection.iceConnectionState);
         };
 
         // Add local stream if available (for students)
@@ -384,6 +400,22 @@ class ScreenSharingApp {
             // Create peer connection with tutor
             await this.createPeerConnection('tutor', true);
         }
+    }
+
+    async restartConnection(peerId, wasInitiator) {
+        console.log('Restarting connection with', peerId);
+        
+        // Close existing connection
+        if (this.peerConnections.has(peerId)) {
+            this.peerConnections.get(peerId).close();
+            this.peerConnections.delete(peerId);
+        }
+
+        // Wait a bit before retrying
+        setTimeout(async () => {
+            console.log('Retrying connection with', peerId);
+            await this.createPeerConnection(peerId, wasInitiator);
+        }, 2000);
     }
 
     async handleWebRTCOffer(data) {
