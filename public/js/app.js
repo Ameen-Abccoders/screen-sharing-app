@@ -267,7 +267,14 @@ class ScreenSharingApp {
         peerConnection.ontrack = (event) => {
             console.log('Received remote stream from', peerId, event.streams);
             const [remoteStream] = event.streams;
-            const streamDiv = document.getElementById(`stream-${peerId}`);
+            
+            // For tutors receiving from students, use the peerId (student's socket ID)
+            // For students, this won't be used since they don't receive streams
+            let streamDiv;
+            if (this.userType === 'tutor') {
+                streamDiv = document.getElementById(`stream-${peerId}`);
+            }
+            
             if (streamDiv) {
                 const video = streamDiv.querySelector('video');
                 video.srcObject = remoteStream;
@@ -288,7 +295,10 @@ class ScreenSharingApp {
                 
                 console.log('Set remote stream to video element for', peerId);
             } else {
-                console.error('Stream div not found for', peerId);
+                console.error('Stream div not found for', peerId, 'userType:', this.userType);
+                // Debug: list all available stream divs
+                const allStreamDivs = document.querySelectorAll('[id^="stream-"]');
+                console.log('Available stream divs:', Array.from(allStreamDivs).map(div => div.id));
             }
         };
 
