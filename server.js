@@ -86,31 +86,59 @@ io.on('connection', (socket) => {
   });
 
   // Simplified WebRTC signaling
-  socket.on('offer', (data) => {
-    const room = rooms.get(socket.roomId);
-    if (room && room.tutor && socket.userType === 'student') {
-      // Student sending offer to tutor
-      io.to(room.tutor).emit('offer', {
-        offer: data.offer,
-        studentId: socket.id
-      });
-    }
+  // socket.on('offer', (data) => {
+  //   const room = rooms.get(socket.roomId);
+  //   if (room && room.tutor && socket.userType === 'student') {
+  //     // Student sending offer to tutor
+  //     io.to(room.tutor).emit('offer', {
+  //       offer: data.offer,
+  //       studentId: socket.id
+  //     });
+  //   }
+  // });
+
+  // socket.on('answer', (data) => {
+  //   const room = rooms.get(socket.roomId);
+  //   if (room && socket.userType === 'tutor') {
+  //     // Tutor sending answer to student
+  //     socket.broadcast.to(socket.roomId).emit('answer', {
+  //       answer: data.answer
+  //     });
+  //   }
+  // });
+
+  // socket.on('ice-candidate', (data) => {
+  //   // Broadcast ICE candidate to other users in the room
+  //   socket.broadcast.to(socket.roomId).emit('ice-candidate', {
+  //     candidate: data.candidate
+  //   });
+  // });
+
+  // WebRTC signaling handlers
+  socket.on('webrtc-offer', (data) => {
+    const { target, offer } = data;
+    console.log(`[webrtc-offer] ${socket.id} sending offer to ${target}`);
+    io.to(target).emit('webrtc-offer', {
+      sender: socket.id,
+      offer: offer
+    });
   });
 
-  socket.on('answer', (data) => {
-    const room = rooms.get(socket.roomId);
-    if (room && socket.userType === 'tutor') {
-      // Tutor sending answer to student
-      socket.broadcast.to(socket.roomId).emit('answer', {
-        answer: data.answer
-      });
-    }
+  socket.on('webrtc-answer', (data) => {
+    const { target, answer } = data;
+    console.log(`[webrtc-answer] ${socket.id} sending answer to ${target}`);
+    io.to(target).emit('webrtc-answer', {
+      sender: socket.id,
+      answer: answer
+    });
   });
 
-  socket.on('ice-candidate', (data) => {
-    // Broadcast ICE candidate to other users in the room
-    socket.broadcast.to(socket.roomId).emit('ice-candidate', {
-      candidate: data.candidate
+  socket.on('webrtc-ice-candidate', (data) => {
+    const { target, candidate } = data;
+    console.log(`[webrtc-ice-candidate] ${socket.id} sending candidate to ${target}`);
+    io.to(target).emit('webrtc-ice-candidate', {
+      sender: socket.id,
+      candidate: candidate
     });
   });
 
