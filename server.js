@@ -22,6 +22,7 @@ io.on('connection', (socket) => {
 
   socket.on('join-room', (data) => {
     const { roomId, userType, userName } = data;
+    console.log(`[DEBUG] User ${socket.id} (${userName}, ${userType}) joining room ${roomId}`);
     
     socket.join(roomId);
     socket.userType = userType;
@@ -60,28 +61,36 @@ io.on('connection', (socket) => {
   socket.on('start-screen-share', () => {
     const room = rooms.get(socket.roomId);
     if (room && room.students.has(socket.id)) {
+      console.log(`[DEBUG] Student ${socket.id} (${socket.userName}) started screen sharing in room ${socket.roomId}.`);
       room.students.get(socket.id).screenSharing = true;
       
       if (room.tutor) {
+        console.log(`[DEBUG] Notifying tutor ${room.tutor} about student ${socket.id} starting screen share.`);
         io.to(room.tutor).emit('student-screen-share-started', {
           studentId: socket.id,
           name: socket.userName
         });
       }
+    } else {
+      console.warn(`[DEBUG] 'start-screen-share' received from socket ${socket.id} but no valid room or student record found.`);
     }
   });
 
   socket.on('stop-screen-share', () => {
     const room = rooms.get(socket.roomId);
     if (room && room.students.has(socket.id)) {
+      console.log(`[DEBUG] Student ${socket.id} (${socket.userName}) stopped screen sharing in room ${socket.roomId}.`);
       room.students.get(socket.id).screenSharing = false;
       
       if (room.tutor) {
+        console.log(`[DEBUG] Notifying tutor ${room.tutor} about student ${socket.id} stopping screen share.`);
         io.to(room.tutor).emit('student-screen-share-stopped', {
           studentId: socket.id,
           name: socket.userName
         });
       }
+    } else {
+      console.warn(`[DEBUG] 'stop-screen-share' received from socket ${socket.id} but no valid room or student record found.`);
     }
   });
 
@@ -143,7 +152,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    console.log('User disconnected:', socket.id);
+    console.log(`[DEBUG] User ${socket.id} (${socket.userName}, ${socket.userType}) disconnected from room ${socket.roomId}.`);
     
     const room = rooms.get(socket.roomId);
     if (room) {
