@@ -4,9 +4,15 @@ class ScreenSharingApp {
         this.userType = null;
         this.userName = null;
         this.roomId = null;
-        this.tutorId = null; // Added to store tutor's socket ID
-        this.localStream = null;
+        this.tutorId = null;
+        // this.localStream = null; // Will be replaced by combinedStream for sending
+        this.screenStream = null;
+        this.userMediaStream = null;
+        this.combinedStream = null;
         this.peerConnections = new Map();
+        this.shareAttempt = 0;
+        this._screenStreamEndedHandler = null; // Renamed for clarity
+        this._lastScreenVideoTrack = null; // Renamed for clarity
         
         this.initializeElements();
         this.bindEvents();
@@ -29,6 +35,8 @@ class ScreenSharingApp {
         this.stopSharingBtn = document.getElementById('stopSharingBtn');
         this.leaveRoomBtn = document.getElementById('leaveRoomBtn');
         this.localVideo = document.getElementById('localVideo');
+        this.toggleCameraBtn = document.getElementById('toggleCameraBtn');
+        this.toggleMicBtn = document.getElementById('toggleMicBtn');
 
         // Tutor elements
         this.tutorLeaveBtn = document.getElementById('tutorLeaveBtn');
@@ -42,6 +50,9 @@ class ScreenSharingApp {
         this.stopSharingBtn.addEventListener('click', () => this.stopScreenShare());
         this.leaveRoomBtn.addEventListener('click', () => this.leaveRoom());
         this.tutorLeaveBtn.addEventListener('click', () => this.leaveRoom());
+        if (this.toggleCameraBtn) this.toggleCameraBtn.addEventListener('click', () => this.toggleCamera());
+        if (this.toggleMicBtn) this.toggleMicBtn.addEventListener('click', () => this.toggleMicrophone());
+
 
         // Handle user type change
         document.querySelectorAll('input[name="userType"]').forEach(radio => {
@@ -183,78 +194,177 @@ class ScreenSharingApp {
         }
     }
 
-    async startScreenShare() {
-        console.log(`[DEBUG][${this.userType}] Attempting to start screen share. Current localStream:`, this.localStream, "PeerConnections:", this.peerConnections.size);
-        // Ensure any previous stream and connections are fully cleaned up
-        if (this.localStream || this.peerConnections.size > 0) {
-            console.warn(`[DEBUG][${this.userType}] startScreenShare called with existing stream or connections. Performing cleanup first.`);
-            this.stopScreenShare(false); // Call internal stop without emitting to server yet
+    async startScreenShare() { // Renaming to startMediaCapture or similar might be good eventually
+        this.shareAttempt = (this.shareAttempt || 0) + 1;
+        const currentShareAttempt = this.shareAttempt;
+        console.log(`[STUDENT][DEBUG Share #${currentShareAttempt}] Attempting to start media capture. Current combinedStream:`, this.combinedStream?.id, `Active: ${this.combinedStream?.active}. PeerConnections: ${this.peerConnections.size}`);
+
+        if (this.combinedStream || this.screenStream || this.userMediaStream || this.peerConnections.size > 0) {
+            console.warn(`[STUDENT][DEBUG Share #${currentShareAttempt}] startScreenShare called with existing streams or connections. Performing cleanup first.`);
+            this.stopScreenShare(false);
+            console.log(`[STUDENT][DEBUG Share #${currentShareAttempt}] Cleanup finished. combinedStream: ${this.combinedStream}, screenStream: ${this.screenStream}, userMediaStream: ${this.userMediaStream}, PeerConnections: ${this.peerConnections.size}`);
         }
 
-        try {
-            console.log(`[${this.userType}] Requesting new screen capture stream.`);
-            this.localStream = await navigator.mediaDevices.getDisplayMedia({
-                video: { mediaSource: 'screen' },
-                audio: true // Consider if audio is always needed or configurable
-            });
-            console.log(`[${this.userType}] New local stream acquired:`, this.localStream.id);
+        let acquiredScreen = false;
+        let acquiredUserMedia = false;
 
-            this.localVideo.srcObject = this.localStream;
-            this.localVideo.style.display = 'block';
+        try {
+            // Attempt to get screen sharing stream
+            try {
+                console.log(`[STUDENT][DEBUG Share #${currentShareAttempt}] Requesting screen capture stream.`);
+                this.screenStream = await navigator.mediaDevices.getDisplayMedia({
+                    video: { mediaSource: 'screen' }, // Typically includes audio from the screen share
+                    audio: true
+                });
+                console.log(`[STUDENT][DEBUG Share #${currentShareAttempt}] Screen stream acquired: ID=${this.screenStream.id}, Active=${this.screenStream.active}`);
+                this.screenStream.getTracks().forEach(t => console.log(`[STUDENT][DEBUG Share #${currentShareAttempt}] Screen track: ${t.kind} id: ${t.id}, label: ${t.label}`));
+                acquiredScreen = true;
+
+                if (this.screenStream.getVideoTracks().length > 0) {
+                    if (this._screenStreamEndedHandler && this._lastScreenVideoTrack) {
+                         console.log(`[STUDENT][DEBUG Share #${currentShareAttempt}] Removing old 'ended' listener from screen track ${this._lastScreenVideoTrack.id}`);
+                         this._lastScreenVideoTrack.removeEventListener('ended', this._screenStreamEndedHandler);
+                    }
+                    this._screenStreamEndedHandler = () => {
+                        console.log(`[STUDENT][DEBUG Share #${currentShareAttempt}] Screen stream video track 'ended' event triggered.`);
+                        this.stopScreenShare();
+                    };
+                    this._lastScreenVideoTrack = this.screenStream.getVideoTracks()[0];
+                    console.log(`[STUDENT][DEBUG Share #${currentShareAttempt}] Adding 'ended' listener to screen video track ${this._lastScreenVideoTrack.id}`);
+                    this._lastScreenVideoTrack.addEventListener('ended', this._screenStreamEndedHandler);
+                } else {
+                    console.warn(`[STUDENT][DEBUG Share #${currentShareAttempt}] Screen stream has no video tracks. Cannot add 'ended' listener.`);
+                }
+            } catch (err) {
+                console.warn(`[STUDENT][DEBUG Share #${currentShareAttempt}] Could not acquire screen share stream:`, err.name, err.message);
+                if (err.name !== "NotAllowedError" && err.name !== "NotFoundError") { // Only alert if not a simple denial
+                    alert(`Screen sharing permission denied or error: ${err.message}`);
+                }
+            }
+
+            // Attempt to get camera/microphone stream
+            try {
+                console.log(`[STUDENT][DEBUG Share #${currentShareAttempt}] Requesting user media (camera/mic).`);
+                this.userMediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                console.log(`[STUDENT][DEBUG Share #${currentShareAttempt}] User media stream acquired: ID=${this.userMediaStream.id}, Active=${this.userMediaStream.active}`);
+                this.userMediaStream.getTracks().forEach(t => console.log(`[STUDENT][DEBUG Share #${currentShareAttempt}] User media track: ${t.kind} id: ${t.id}, label: ${t.label}`));
+                acquiredUserMedia = true;
+            } catch (err) {
+                console.warn(`[STUDENT][DEBUG Share #${currentShareAttempt}] Could not acquire user media (camera/mic):`, err.name, err.message);
+                 if (err.name !== "NotAllowedError" && err.name !== "NotFoundError") {
+                    alert(`Camera/microphone permission denied or error: ${err.message}`);
+                }
+            }
+
+            if (!acquiredScreen && !acquiredUserMedia) {
+                console.error(`[STUDENT][DEBUG Share #${currentShareAttempt}] Failed to acquire any media stream.`);
+                this.updateStatus('Failed to acquire any media. Please check permissions.');
+                this.shareScreenBtn.style.display = 'inline-block'; // Ensure button is visible again
+                this.stopSharingBtn.style.display = 'none';
+                return; // Exit if no streams were acquired
+            }
+
+            this.combinedStream = new MediaStream();
+            console.log(`[STUDENT][DEBUG Share #${currentShareAttempt}] Created combinedStream: ID=${this.combinedStream.id}`);
+
+            if (this.screenStream) {
+                this.screenStream.getTracks().forEach(track => {
+                    console.log(`[STUDENT][DEBUG Share #${currentShareAttempt}] Adding screen track to combinedStream: ${track.kind} id: ${track.id}`);
+                    this.combinedStream.addTrack(track.clone()); // Clone tracks to avoid issues if original stream is stopped independently
+                });
+            }
+            if (this.userMediaStream) {
+                this.userMediaStream.getTracks().forEach(track => {
+                    console.log(`[STUDENT][DEBUG Share #${currentShareAttempt}] Adding user media track to combinedStream: ${track.kind} id: ${track.id}`);
+                    this.combinedStream.addTrack(track.clone());
+                });
+            }
+            console.log(`[STUDENT][DEBUG Share #${currentShareAttempt}] Combined stream has ${this.combinedStream.getTracks().length} tracks:`);
+            this.combinedStream.getTracks().forEach(t => console.log(`  - Track kind: ${t.kind}, id: ${t.id}, label: ${t.label}`));
+
+
+            // Update local video preview: Prioritize screen share for the main preview element
+            if (this.screenStream && this.screenStream.getVideoTracks().length > 0) {
+                this.localVideo.srcObject = this.screenStream;
+                console.log(`[STUDENT][DEBUG Share #${currentShareAttempt}] Displaying screenStream in localVideo.`);
+            } else if (this.userMediaStream && this.userMediaStream.getVideoTracks().length > 0) {
+                // If only camera is available, show that in localVideo.
+                // Or, if you want a dedicated camera preview element, that would be a separate UI task.
+                this.localVideo.srcObject = this.userMediaStream;
+                console.log(`[STUDENT][DEBUG Share #${currentShareAttempt}] Displaying userMediaStream in localVideo (screen share not available/no video).`);
+            } else {
+                 this.localVideo.srcObject = null; // No video to preview
+            }
+            this.localVideo.style.display = (this.localVideo.srcObject) ? 'block' : 'none';
             
             this.shareScreenBtn.style.display = 'none';
             this.stopSharingBtn.style.display = 'inline-block';
+            this.updateMediaToggleButtons();
 
-            console.log(`[${this.userType}] Screen sharing started locally. Stream:`, this.localStream);
-            this.localStream.getTracks().forEach(track => {
-                console.log(`[${this.userType}] Local track: ${track.kind}, label: ${track.label}, id: ${track.id}`);
-            });
 
-            this.updateStatus('Screen sharing active. Notifying server...');
+            this.updateStatus('Media sharing active. Notifying server...');
             this.socket.emit('start-screen-share');
-            console.log(`[${this.userType}] Emitted 'start-screen-share' to server.`);
+            console.log(`[STUDENT][DEBUG Share #${currentShareAttempt}] Emitted 'start-screen-share' to server.`);
 
-            // Handle stream ending
-            this.localStream.getVideoTracks()[0].addEventListener('ended', () => {
-                this.stopScreenShare();
-            });
-
-            // Wait a bit for the tutor to be notified, then initiate connection
             setTimeout(async () => {
-                console.log(`[${this.userType}] Initiating peer connections.`);
+                console.log(`[STUDENT][DEBUG Share #${currentShareAttempt}] Initiating peer connections with combinedStream.`);
                 await this.initiatePeerConnections();
-            }, 1000); // Delay to allow server to process 'start-screen-share'
+            }, 1000);
 
         } catch (error) {
-            console.error(`[${this.userType}] Error starting screen share:`, error);
-            alert('Failed to start screen sharing. Please check permissions and ensure you are on HTTPS if not localhost.');
-            this.updateStatus('Screen sharing failed.');
-            // Reset buttons
-            this.shareScreenBtn.style.display = 'inline-block';
-            this.stopSharingBtn.style.display = 'none';
+            console.error(`[STUDENT][DEBUG Share #${currentShareAttempt}] Error in startScreenShare main try block:`, error);
+            alert('An unexpected error occurred while starting media sharing.');
+            this.stopScreenShare(false);
+            this.updateStatus('Media sharing failed.');
         }
     }
 
     stopScreenShare(notifyServer = true) {
-        console.log(`[DEBUG][${this.userType}] stopScreenShare called. notifyServer: ${notifyServer}. Current localStream:`, this.localStream ? this.localStream.id : 'null', "PeerConnections:", this.peerConnections.size);
+        const currentShareAttempt = this.userType === 'student' ? this.shareAttempt : 'N/A';
+        console.log(`[${this.userType}][DEBUG Share #${currentShareAttempt}] stopScreenShare called. notifyServer: ${notifyServer}. PeerConnections: ${this.peerConnections.size}`);
+        console.log(`[${this.userType}][DEBUG Share #${currentShareAttempt}] State before cleanup: screenStream: ${this.screenStream?.id}, userMediaStream: ${this.userMediaStream?.id}, combinedStream: ${this.combinedStream?.id}`);
 
-        if (this.localStream) {
-            console.log(`[${this.userType}] Stopping all tracks for local stream: ${this.localStream.id}`);
-            this.localStream.getTracks().forEach(track => {
-                console.log(`[${this.userType}] Stopping local track: ${track.kind}, label: ${track.label}, id: ${track.id}, readyState: ${track.readyState}`);
+        // Stop screen stream tracks
+        if (this.screenStream) {
+            console.log(`[${this.userType}][DEBUG Share #${currentShareAttempt}] Stopping screenStream tracks: ${this.screenStream.id}`);
+            this.screenStream.getTracks().forEach(track => {
+                console.log(`[${this.userType}][DEBUG Share #${currentShareAttempt}] Stopping screen track: ${track.kind} id: ${track.id}, readyState: ${track.readyState}`);
+                if (this.userType === 'student' && track.kind === 'video' && this._screenStreamEndedHandler && track === this._lastScreenVideoTrack) {
+                    console.log(`[STUDENT][DEBUG Share #${currentShareAttempt}] Removing 'ended' listener from screen video track ${track.id}`);
+                    track.removeEventListener('ended', this._screenStreamEndedHandler);
+                }
                 track.stop();
-                console.log(`[${this.userType}] Track ${track.id} stopped. readyState: ${track.readyState}`);
             });
-            this.localStream = null;
-            console.log(`[${this.userType}] Local stream object set to null.`);
-        } else {
-            console.log(`[${this.userType}] No local stream to stop.`);
+            this.screenStream = null;
+            this._lastScreenVideoTrack = null;
+            this._screenStreamEndedHandler = null;
+            console.log(`[${this.userType}][DEBUG Share #${currentShareAttempt}] screenStream nulled.`);
         }
+
+        // Stop user media stream tracks
+        if (this.userMediaStream) {
+            console.log(`[${this.userType}][DEBUG Share #${currentShareAttempt}] Stopping userMediaStream tracks: ${this.userMediaStream.id}`);
+            this.userMediaStream.getTracks().forEach(track => {
+                console.log(`[${this.userType}][DEBUG Share #${currentShareAttempt}] Stopping user media track: ${track.kind} id: ${track.id}, readyState: ${track.readyState}`);
+                track.stop();
+            });
+            this.userMediaStream = null;
+            console.log(`[${this.userType}][DEBUG Share #${currentShareAttempt}] userMediaStream nulled.`);
+        }
+
+        // Combined stream tracks are references, they are stopped when original streams are stopped.
+        if(this.combinedStream){
+            console.log(`[${this.userType}][DEBUG Share #${currentShareAttempt}] Nullifying combinedStream. Tracks should be already stopped.`);
+            this.combinedStream = null; // Nullify the combined stream reference
+        }
+
 
         this.localVideo.srcObject = null;
         this.localVideo.style.display = 'none';
         this.shareScreenBtn.style.display = 'inline-block';
         this.stopSharingBtn.style.display = 'none';
+        if (this.toggleCameraBtn) this.toggleCameraBtn.style.display = 'none';
+        if (this.toggleMicBtn) this.toggleMicBtn.style.display = 'none';
         console.log(`[${this.userType}] UI elements for screen share reset.`);
 
         if (notifyServer) {
@@ -263,20 +373,78 @@ class ScreenSharingApp {
             console.log(`[${this.userType}] Emitted 'stop-screen-share' to server.`);
         }
 
-        // Close all peer connections
-        if (this.peerConnections.size > 0) {
-            console.log(`[${this.userType}] Closing all peer connections. Count: ${this.peerConnections.size}`);
-            this.peerConnections.forEach((pc, peerId) => {
-                console.log(`[DEBUG][${this.userType}] Closing peer connection with ${peerId}. State: ${pc.connectionState}, Signaling: ${pc.signalingState}`);
-                pc.close();
-                console.log(`[${this.userType}] Peer connection with ${peerId} closed. State: ${pc.connectionState}, Signaling: ${pc.signalingState}`);
+        // Close all peer connections by first collecting keys, then iterating
+        const peerIdsToClose = Array.from(this.peerConnections.keys());
+        if (peerIdsToClose.length > 0) {
+            console.log(`[${this.userType}][DEBUG Share #${currentShareAttempt}] Closing all peer connections. Count: ${peerIdsToClose.length}`);
+            peerIdsToClose.forEach(peerId => {
+                // Determine initiator context for cleanup logging, assumes student is always initiator for its connections
+                const isInitiatorContext = (this.userType === 'student' && peerId === this.tutorId);
+                this.cleanupPeerConnection(peerId, isInitiatorContext);
             });
-            this.peerConnections.clear();
-            console.log(`[${this.userType}] Peer connections map cleared.`);
+            if(this.peerConnections.size > 0) { // Should be 0 if cleanupPeerConnection works
+                console.warn(`[${this.userType}][DEBUG Share #${currentShareAttempt}] Peer connections map not empty after targeted cleanup. Size: ${this.peerConnections.size}. Forcing clear.`);
+                this.peerConnections.clear();
+            }
+            console.log(`[${this.userType}][DEBUG Share #${currentShareAttempt}] All peer connections processed for closure.`);
         } else {
-            console.log(`[${this.userType}] No peer connections to close.`);
+            console.log(`[${this.userType}][DEBUG Share #${currentShareAttempt}] No peer connections to close.`);
         }
-        console.log(`[DEBUG][${this.userType}] stopScreenShare finished. localStream:`, this.localStream, "PeerConnections:", this.peerConnections.size);
+        console.log(`[${this.userType}][DEBUG Share #${currentShareAttempt}] State after cleanup: combinedStream: ${this.combinedStream}, screenStream: ${this.screenStream}, userMediaStream: ${this.userMediaStream}, PeerConnections: ${this.peerConnections.size}`);
+    }
+
+    toggleCamera() {
+        if (!this.userMediaStream) {
+            console.warn('[STUDENT] toggleCamera: No userMediaStream to toggle camera.');
+            return;
+        }
+        const videoTrack = this.userMediaStream.getVideoTracks()[0];
+        if (videoTrack) {
+            videoTrack.enabled = !videoTrack.enabled;
+            console.log(`[STUDENT] Camera ${videoTrack.enabled ? 'enabled' : 'disabled'}`);
+            this.updateMediaToggleButtons();
+        } else {
+            console.warn('[STUDENT] toggleCamera: No video track found in userMediaStream.');
+        }
+    }
+
+    toggleMicrophone() {
+        if (!this.userMediaStream) {
+            console.warn('[STUDENT] toggleMicrophone: No userMediaStream to toggle microphone.');
+            return;
+        }
+        const audioTrack = this.userMediaStream.getAudioTracks()[0];
+        if (audioTrack) {
+            audioTrack.enabled = !audioTrack.enabled;
+            console.log(`[STUDENT] Microphone ${audioTrack.enabled ? 'enabled' : 'disabled'}`);
+            this.updateMediaToggleButtons();
+        } else {
+            console.warn('[STUDENT] toggleMicrophone: No audio track found in userMediaStream.');
+        }
+    }
+
+    updateMediaToggleButtons() {
+        if (this.userMediaStream && this.toggleCameraBtn && this.toggleMicBtn) {
+            this.toggleCameraBtn.style.display = 'inline-block';
+            this.toggleMicBtn.style.display = 'inline-block';
+
+            const videoTrack = this.userMediaStream.getVideoTracks()[0];
+            if (videoTrack) {
+                this.toggleCameraBtn.textContent = videoTrack.enabled ? 'Camera Off' : 'Camera On';
+            } else {
+                this.toggleCameraBtn.style.display = 'none'; // Hide if no video track
+            }
+
+            const audioTrack = this.userMediaStream.getAudioTracks()[0];
+            if (audioTrack) {
+                this.toggleMicBtn.textContent = audioTrack.enabled ? 'Mute Mic' : 'Unmute Mic';
+            } else {
+                 this.toggleMicBtn.style.display = 'none'; // Hide if no audio track
+            }
+        } else {
+            if (this.toggleCameraBtn) this.toggleCameraBtn.style.display = 'none';
+            if (this.toggleMicBtn) this.toggleMicBtn.style.display = 'none';
+        }
     }
 
     leaveRoom() {
@@ -417,68 +585,75 @@ class ScreenSharingApp {
 
         // Handle connection state changes
         peerConnection.onconnectionstatechange = () => {
-            console.log(`[${this.userType}] Connection state with ${peerId}: ${peerConnection.connectionState}`);
+            const attempt = (isInitiator && this.userType === 'student') ? `#${this.shareAttempt}` : '';
+            console.log(`[${this.userType}][PC ${peerId}][DEBUG Share ${attempt}] Connection state: ${peerConnection.connectionState}, Signaling: ${peerConnection.signalingState}, ICE: ${peerConnection.iceConnectionState}`);
             if (peerConnection.connectionState === 'failed') {
-                console.error(`[${this.userType}][DEBUG] WebRTC connection with ${peerId} FAILED. State: ${peerConnection.connectionState}, Signaling: ${peerConnection.signalingState}`);
+                console.error(`[${this.userType}][PC ${peerId}][DEBUG Share ${attempt}] WebRTC connection FAILED.`);
                 this.cleanupPeerConnection(peerId, isInitiator);
-                // Optionally, try to restart the connection
-                // this.restartConnection(peerId, isInitiator); // Be cautious with auto-restarts on 'failed'
             } else if (peerConnection.connectionState === 'connected') {
-                console.log(`[${this.userType}][DEBUG] WebRTC connection with ${peerId} CONNECTED. State: ${peerConnection.connectionState}, Signaling: ${peerConnection.signalingState}`);
+                console.log(`[${this.userType}][PC ${peerId}][DEBUG Share ${attempt}] WebRTC connection CONNECTED.`);
             } else if (peerConnection.connectionState === 'disconnected') {
-                console.warn(`[${this.userType}][DEBUG] WebRTC connection with ${peerId} DISCONNECTED. State: ${peerConnection.connectionState}, Signaling: ${peerConnection.signalingState}. Will wait for potential auto-reconnect or ICE restart.`);
-                // Browsers might attempt to auto-reconnect. Don't clean up immediately.
-                // If it transitions to 'failed' or stays 'disconnected' for too long, then cleanup.
+                console.warn(`[${this.userType}][PC ${peerId}][DEBUG Share ${attempt}] WebRTC connection DISCONNECTED. Waiting for potential auto-reconnect.`);
             } else if (peerConnection.connectionState === 'closed') {
-                console.log(`[${this.userType}][DEBUG] WebRTC connection with ${peerId} CLOSED. State: ${peerConnection.connectionState}, Signaling: ${peerConnection.signalingState}. Cleaning up.`);
+                console.log(`[${this.userType}][PC ${peerId}][DEBUG Share ${attempt}] WebRTC connection CLOSED. Cleaning up.`);
                 this.cleanupPeerConnection(peerId, isInitiator);
-            } else {
-                 console.log(`[${this.userType}][DEBUG] WebRTC connection with ${peerId} state changed: ${peerConnection.connectionState}. Signaling: ${peerConnection.signalingState}`);
             }
         };
 
         // Handle ICE connection state
         peerConnection.oniceconnectionstatechange = () => {
-            console.log(`[${this.userType}] ICE connection state with ${peerId}: ${peerConnection.iceConnectionState}`);
+            const attempt = (isInitiator && this.userType === 'student') ? `#${this.shareAttempt}` : '';
+            console.log(`[${this.userType}][PC ${peerId}][DEBUG Share ${attempt}] ICE connection state: ${peerConnection.iceConnectionState}, Signaling: ${peerConnection.signalingState}`);
         };
 
         peerConnection.onsignalingstatechange = () => {
-            console.log(`[${this.userType}] Signaling state with ${peerId}: ${peerConnection.signalingState}`);
+            const attempt = (isInitiator && this.userType === 'student') ? `#${this.shareAttempt}` : '';
+            console.log(`[${this.userType}][PC ${peerId}][DEBUG Share ${attempt}] Signaling state: ${peerConnection.signalingState}, Connection: ${peerConnection.connectionState}, ICE: ${peerConnection.iceConnectionState}`);
         };
 
 
         // Add local stream tracks if this peer connection is supposed to send them
-        if (this.localStream && isInitiator) { // Student is initiator and sends stream
-            console.log(`[${this.userType}] Adding local stream tracks to peer connection with ${peerId}.`);
-            this.localStream.getTracks().forEach(track => {
-                console.log(`[${this.userType}] Adding track: ${track.kind} (label: ${track.label}, id: ${track.id}) to PC for ${peerId}`);
+        // STUDENT SIDE: 'isInitiator' is true. 'this.combinedStream' should be used.
+        if (isInitiator && this.combinedStream) {
+            console.log(`[STUDENT][PC ${peerId}] Adding combinedStream tracks to peer connection.`);
+            this.combinedStream.getTracks().forEach(track => {
+                console.log(`[STUDENT][PC ${peerId}] Adding track: ${track.kind} (label: ${track.label}, id: ${track.id})`);
                 try {
-                    peerConnection.addTrack(track, this.localStream);
+                    // Ensure track is active before adding
+                    if (track.readyState === 'live') {
+                        peerConnection.addTrack(track, this.combinedStream);
+                    } else {
+                        console.warn(`[STUDENT][PC ${peerId}] Skipping inactive track: ${track.kind} id: ${track.id}, label: ${track.label}`);
+                    }
                 } catch (e) {
-                    console.error(`[${this.userType}] Error adding track ${track.id} to PC for ${peerId}:`, e);
+                    console.error(`[STUDENT][PC ${peerId}] Error adding track ${track.id}:`, e);
                 }
             });
-            console.log(`[${this.userType}] Finished adding local tracks for ${peerId}. Senders:`, peerConnection.getSenders().length);
+            console.log(`[STUDENT][PC ${peerId}] Finished adding combinedStream tracks. Senders:`, peerConnection.getSenders().length);
+        } else if (!isInitiator) {
+            // TUTOR SIDE: isInitiator is false. Tutor does not send tracks in this model.
+            console.log(`[TUTOR][PC ${peerId}] Not adding local tracks as tutor does not send media.`);
         } else {
-             console.log(`[${this.userType}] Not adding local stream tracks. LocalStream available: ${!!this.localStream}, Is Initiator: ${isInitiator}`);
+             console.log(`[STUDENT][PC ${peerId}] Not adding local tracks. CombinedStream available: ${!!this.combinedStream} (Tracks: ${this.combinedStream?.getTracks().length}), Is Initiator: ${isInitiator}`);
         }
 
         // Create offer if initiator (student will be initiator)
         if (isInitiator) {
-            console.log(`[${this.userType}] Creating WebRTC offer for ${peerId}.`);
+            const currentShareAttempt = this.userType === 'student' ? this.shareAttempt : 'N/A';
+            console.log(`[STUDENT][PC ${peerId}][DEBUG Share #${currentShareAttempt}] Creating WebRTC offer for tutor ${peerId}.`);
             try {
                 const offer = await peerConnection.createOffer();
-                console.log(`[${this.userType}] Offer created for ${peerId}. Setting local description.`);
+                console.log(`[STUDENT][PC ${peerId}][DEBUG Share #${currentShareAttempt}] Offer created. Setting local description. Signaling state: ${peerConnection.signalingState}`);
                 await peerConnection.setLocalDescription(offer);
-                console.log(`[${this.userType}] Local description set for ${peerId}. Signaling state: ${peerConnection.signalingState}. Emitting webrtc-offer.`);
+                console.log(`[STUDENT][PC ${peerId}][DEBUG Share #${currentShareAttempt}] Local description set. Signaling state: ${peerConnection.signalingState}. Emitting webrtc-offer.`);
 
                 this.socket.emit('webrtc-offer', {
                     target: peerId, // Should be tutorId
                     offer: offer
                 });
-                console.log(`[${this.userType}] Sent webrtc-offer to ${peerId}.`);
+                console.log(`[STUDENT][PC ${peerId}][DEBUG Share #${currentShareAttempt}] Sent webrtc-offer to tutor ${peerId}.`);
             } catch (e) {
-                console.error(`[${this.userType}] Error creating offer for ${peerId}:`, e);
+                console.error(`[STUDENT][PC ${peerId}][DEBUG Share #${currentShareAttempt}] Error creating offer for tutor ${peerId}:`, e);
             }
         }
 
@@ -486,128 +661,131 @@ class ScreenSharingApp {
     }
 
     async initiatePeerConnections() {
-        console.log(`[${this.userType}] Attempting to initiate peer connections.`);
+        const currentShareAttempt = this.userType === 'student' ? this.shareAttempt : 'N/A';
+        console.log(`[${this.userType}][DEBUG Share #${currentShareAttempt}] Attempting to initiate peer connections.`);
         // This is called by students to initiate connections with the tutor
-        if (this.userType === 'student' && this.localStream) {
+        if (this.userType === 'student' && this.combinedStream && this.combinedStream.getTracks().length > 0) {
             if (this.tutorId) {
-                console.log(`[STUDENT] Initiating peer connection with tutor: ${this.tutorId}`);
+                console.log(`[STUDENT][DEBUG Share #${currentShareAttempt}] Initiating peer connection with tutor: ${this.tutorId} using combinedStream.`);
                 await this.createPeerConnection(this.tutorId, true);
             } else {
-                console.warn('[STUDENT] Tutor ID not available. Cannot initiate peer connection for screen sharing.');
+                console.warn(`[STUDENT][DEBUG Share #${currentShareAttempt}] Tutor ID not available. Cannot initiate peer connection.`);
                 this.updateStatus('Tutor not found or not ready. Cannot start WebRTC.');
             }
         } else {
-            console.log(`[${this.userType}] Conditions not met for initiating peer connection. UserType: ${this.userType}, LocalStream: ${!!this.localStream}`);
+            console.log(`[${this.userType}][DEBUG Share #${currentShareAttempt}] Conditions not met for initiating peer connection. UserType: ${this.userType}, CombinedStream Tracks: ${this.combinedStream?.getTracks().length}`);
         }
     }
 
     async restartConnection(peerId, wasInitiator) {
-        console.warn(`[${this.userType}][DEBUG] Restarting connection with ${peerId}. Was initiator: ${wasInitiator}`);
+        const currentShareAttempt = (this.userType === 'student' && wasInitiator) ? `#${this.shareAttempt}` : '';
+        console.warn(`[${this.userType}][PC ${peerId}][DEBUG Share ${currentShareAttempt}] Restarting connection. Was initiator: ${wasInitiator}`);
         
-        this.cleanupPeerConnection(peerId, wasInitiator); // Ensure full cleanup before restart
+        this.cleanupPeerConnection(peerId, wasInitiator);
 
-        // Wait a bit before retrying to prevent immediate re-fail loops
         setTimeout(async () => {
-            console.log(`[${this.userType}][DEBUG] Attempting to re-establish peer connection with ${peerId} after delay.`);
-            if (this.userType === 'student' && peerId === this.tutorId) {
+            console.log(`[${this.userType}][PC ${peerId}][DEBUG Share ${currentShareAttempt}] Attempting to re-establish connection after delay.`);
+            if (this.userType === 'student' && peerId === this.tutorId) { // Student is restarting connection with Tutor
                  if (this.localStream && this.localStream.active) {
-                    console.log(`[STUDENT][DEBUG] Re-initiating connection with tutor ${this.tutorId} as part of restart.`);
+                    console.log(`[STUDENT][PC ${peerId}][DEBUG Share ${currentShareAttempt}] Re-initiating connection with tutor.`);
                     await this.createPeerConnection(this.tutorId, true);
                  } else {
-                    console.warn(`[STUDENT][DEBUG] Local stream not available or inactive during restart. Cannot re-initiate with tutor ${this.tutorId}.`);
+                    console.warn(`[STUDENT][PC ${peerId}][DEBUG Share ${currentShareAttempt}] Local stream not available/active during restart. Cannot re-initiate.`);
                  }
-            } else if (this.userType === 'tutor') {
-                console.log(`[TUTOR][DEBUG] Connection with student ${peerId} failed/restarted. Tutor waits for new offer. UI should reflect stoppage.`);
-                // UI cleanup for this student is handled by cleanupPeerConnection via handleStudentScreenShareStopped
+            } else if (this.userType === 'tutor') { // Tutor's connection with a student failed
+                console.log(`[TUTOR][PC ${peerId}][DEBUG Share ${currentShareAttempt}] Connection with student failed/restarted. Tutor waits for new offer.`);
             }
         }, 3000);
     }
 
     cleanupPeerConnection(peerId, isInitiatorContext) {
-        console.log(`[${this.userType}][DEBUG] cleanupPeerConnection called for peerId: ${peerId}`);
+        const currentShareAttempt = (this.userType === 'student' && isInitiatorContext) ? `#${this.shareAttempt}` : '';
+        console.log(`[${this.userType}][PC ${peerId}][DEBUG Share ${currentShareAttempt}] cleanupPeerConnection called.`);
         const pc = this.peerConnections.get(peerId);
         if (pc) {
-            console.log(`[${this.userType}][DEBUG] Closing peer connection for ${peerId}. Current state: ${pc.connectionState}, signaling: ${pc.signalingState}`);
+            console.log(`[${this.userType}][PC ${peerId}][DEBUG Share ${currentShareAttempt}] Cleaning up peer connection. Current state: ${pc.connectionState}, signaling: ${pc.signalingState}`);
             pc.onicecandidate = null;
             pc.ontrack = null;
             pc.onconnectionstatechange = null;
             pc.oniceconnectionstatechange = null;
             pc.onsignalingstatechange = null;
-            pc.close();
+            console.log(`[${this.userType}][PC ${peerId}][DEBUG Share ${currentShareAttempt}] Event listeners nulled.`);
+            if (pc.signalingState !== 'closed') {
+                pc.close();
+                console.log(`[${this.userType}][PC ${peerId}][DEBUG Share ${currentShareAttempt}] Peer connection closed. New state: ${pc.connectionState}, signaling: ${pc.signalingState}`);
+            } else {
+                console.log(`[${this.userType}][PC ${peerId}][DEBUG Share ${currentShareAttempt}] Peer connection already closed.`);
+            }
             this.peerConnections.delete(peerId);
-            console.log(`[${this.userType}][DEBUG] Peer connection for ${peerId} closed and removed from map.`);
+            console.log(`[${this.userType}][PC ${peerId}][DEBUG Share ${currentShareAttempt}] Peer connection removed from map. Map size: ${this.peerConnections.size}`);
         } else {
-            console.log(`[${this.userType}][DEBUG] No peer connection found for ${peerId} in cleanupPeerConnection.`);
+            console.log(`[${this.userType}][PC ${peerId}][DEBUG Share ${currentShareAttempt}] No peer connection found for cleanup.`);
         }
 
         if (this.userType === 'tutor' && peerId) {
-            // If tutor, ensure UI for this student is reset
-            this.handleStudentScreenShareStopped({ studentId: peerId, name: 'Peer' });
+            this.handleStudentScreenShareStopped({ studentId: peerId, name: 'Peer (cleaned)' });
         } else if (this.userType === 'student' && peerId === this.tutorId) {
-            // If student, and this was the connection to the tutor, they might need to be able to share again
-            // The main stopScreenShare method handles student's UI reset for their own stream.
-            console.log(`[STUDENT][DEBUG] Cleaned up PC with tutor ${peerId}. Student can attempt to share again.`);
+            console.log(`[STUDENT][PC ${peerId}][DEBUG Share ${currentShareAttempt}] Cleaned up PC with tutor. Student can attempt to share again if needed.`);
         }
     }
 
     async handleWebRTCOffer(data) {
-        // This is typically called on the Tutor's side
         const studentId = data.sender;
-        console.log(`[TUTOR][DEBUG] Received WebRTC offer from student ${studentId}.`);
+        console.log(`[TUTOR][PC ${studentId}][DEBUG] Received WebRTC offer.`);
 
         let existingPC = this.peerConnections.get(studentId);
         if (existingPC) {
-            console.warn(`[TUTOR][DEBUG] Existing peer connection found for student ${studentId} while handling new offer. State: ${existingPC.connectionState}, Signaling: ${existingPC.signalingState}. Closing old PC before creating new one.`);
-            this.cleanupPeerConnection(studentId, false); // false because tutor is not initiator here
+            console.warn(`[TUTOR][PC ${studentId}][DEBUG] Existing peer connection found while handling new offer. State: ${existingPC.connectionState}, Signaling: ${existingPC.signalingState}. Cleaning up old PC.`);
+            this.cleanupPeerConnection(studentId, false);
         }
         
-        // Create a new peer connection instance for this student. Tutor is not the initiator.
         const peerConnection = await this.createPeerConnection(studentId, false);
         if (!peerConnection) {
-            console.error(`[TUTOR][DEBUG] Failed to create peer connection for student ${studentId} upon receiving offer.`);
+            console.error(`[TUTOR][PC ${studentId}][DEBUG] Failed to create peer connection upon receiving offer.`);
             return;
         }
 
         try {
-            console.log(`[TUTOR] Setting remote description from offer for student ${studentId}. Current signaling state: ${peerConnection.signalingState}`);
+            console.log(`[TUTOR][PC ${studentId}] Setting remote description from offer. Current signaling state: ${peerConnection.signalingState}`);
             await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
-            console.log(`[TUTOR] Remote description set for student ${studentId}. Signaling state: ${peerConnection.signalingState}. Creating answer.`);
+            console.log(`[TUTOR][PC ${studentId}] Remote description set. Signaling state: ${peerConnection.signalingState}. Creating answer.`);
 
             const answer = await peerConnection.createAnswer();
-            console.log(`[TUTOR] Answer created for student ${studentId}. Setting local description.`);
+            console.log(`[TUTOR][PC ${studentId}] Answer created. Setting local description. Signaling state: ${peerConnection.signalingState}`);
             await peerConnection.setLocalDescription(answer);
-            console.log(`[TUTOR] Local description set for student ${studentId}. Signaling state: ${peerConnection.signalingState}. Emitting webrtc-answer.`);
+            console.log(`[TUTOR][PC ${studentId}] Local description set. Signaling state: ${peerConnection.signalingState}. Emitting webrtc-answer.`);
 
             this.socket.emit('webrtc-answer', {
-                target: studentId, // Send answer back to the student who sent the offer
+                target: studentId,
                 answer: answer
             });
-            console.log(`[TUTOR] Sent webrtc-answer to student ${studentId}.`);
+            console.log(`[TUTOR][PC ${studentId}] Sent webrtc-answer.`);
         } catch (error) {
-            console.error(`[TUTOR] Error handling WebRTC offer from ${studentId}:`, error);
+            console.error(`[TUTOR][PC ${studentId}] Error handling WebRTC offer:`, error);
         }
     }
 
     async handleWebRTCAnswer(data) {
-        // This is typically called on the Student's side
-        const peerId = data.sender; // This should be the tutor's ID
-        console.log(`[STUDENT] Received WebRTC answer from ${peerId} (expected tutor).`);
+        const peerId = data.sender; // Tutor's ID
+        const currentShareAttempt = this.userType === 'student' ? this.shareAttempt : 'N/A';
+        console.log(`[STUDENT][PC ${peerId}][DEBUG Share #${currentShareAttempt}] Received WebRTC answer from tutor ${peerId}.`);
 
         const peerConnection = this.peerConnections.get(peerId);
         if (peerConnection) {
+            console.log(`[STUDENT][PC ${peerId}][DEBUG Share #${currentShareAttempt}] Current PC signaling state: ${peerConnection.signalingState}.`);
             if (peerConnection.signalingState === 'have-local-offer') {
                 try {
-                    console.log(`[STUDENT] Setting remote description from answer from ${peerId}. Current signaling state: ${peerConnection.signalingState}`);
+                    console.log(`[STUDENT][PC ${peerId}][DEBUG Share #${currentShareAttempt}] Setting remote description from answer.`);
                     await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-                    console.log(`[STUDENT] Remote description set from answer from ${peerId}. Signaling state: ${peerConnection.signalingState}. Connection should establish.`);
+                    console.log(`[STUDENT][PC ${peerId}][DEBUG Share #${currentShareAttempt}] Remote description set. Signaling state: ${peerConnection.signalingState}. Connection should establish.`);
                 } catch (error) {
-                    console.error(`[STUDENT] Error setting remote description from answer from ${peerId}:`, error);
+                    console.error(`[STUDENT][PC ${peerId}][DEBUG Share #${currentShareAttempt}] Error setting remote description from answer:`, error);
                 }
             } else {
-            console.warn(`[STUDENT][DEBUG] Received answer from ${peerId}, but signaling state is ${peerConnection.signalingState} (expected 'have-local-offer'). This might be a late answer or a bug.`);
+                console.warn(`[STUDENT][PC ${peerId}][DEBUG Share #${currentShareAttempt}] Received answer, but signaling state is ${peerConnection.signalingState} (expected 'have-local-offer'). This might be a late answer or a bug.`);
             }
         } else {
-            console.error(`[STUDENT][DEBUG] No peer connection found for ${peerId} (tutor) when handling answer. Current tutorId: ${this.tutorId}. PeerConnections map size: ${this.peerConnections.size}`);
+            console.error(`[STUDENT][DEBUG Share #${currentShareAttempt}] No peer connection found for tutor ${peerId} when handling answer. Current tutorId: ${this.tutorId}. PeerConnections map size: ${this.peerConnections.size}`);
         }
     }
 
