@@ -31,16 +31,25 @@
             <div class="header">
                 <h2>Student View - <span id="studentName"></span></h2>
                 <div class="controls">
+                    <!--
                     <button id="shareScreenBtn" class="btn-primary">Share Screen</button>
                     <button id="stopSharingBtn" class="btn-secondary" style="display: none;">Stop Sharing</button>
                     <button id="toggleCameraBtn" class="btn-secondary" style="display: none;">Camera Off</button>
                     <button id="toggleMicBtn" class="btn-secondary" style="display: none;">Mute Mic</button>
                     <button id="leaveRoomBtn" class="btn-danger">Leave Room</button>
+                    -->
+                    <span id="connectionStatus" class="status">Connecting to room...</span> <!-- Moved status here -->
                 </div>
             </div>
             <div class="content">
-                <div id="connectionStatus" class="status">Connecting to room...</div>
+                <!-- <div id="connectionStatus" class="status">Connecting to room...</div> --> <!-- Old status position -->
                 <video id="localVideo" autoplay muted style="display: none;"></video>
+            </div>
+            <div id="mediaControlBar" class="control-bar">
+                <button id="micBtn" class="control-button" title="Toggle Microphone">🎤</button>
+                <button id="cameraBtn" class="control-button" title="Toggle Camera">📷</button>
+                <button id="presentBtn" class="control-button control-button-present" title="Start/Stop Presenting">💻</button>
+                <button id="hangupBtn" class="control-button control-button-hangup" title="Leave Room">📞</button>
             </div>
         </div>
 

@@ -11,8 +11,9 @@ class ScreenSharingApp {
         this.combinedStream = null;
         this.peerConnections = new Map();
         this.shareAttempt = 0;
-        this._screenStreamEndedHandler = null; // Renamed for clarity
-        this._lastScreenVideoTrack = null; // Renamed for clarity
+        this._screenStreamEndedHandler = null;
+        this._lastScreenVideoTrack = null;
+        this.isMediaActive = false; // Tracks if any media is being shared
         
         this.initializeElements();
         this.bindEvents();
@@ -31,12 +32,20 @@ class ScreenSharingApp {
         this.joinBtn = document.getElementById('joinBtn');
 
         // Student elements
-        this.shareScreenBtn = document.getElementById('shareScreenBtn');
-        this.stopSharingBtn = document.getElementById('stopSharingBtn');
-        this.leaveRoomBtn = document.getElementById('leaveRoomBtn');
+        // Old buttons (commented out in HTML, remove refs here)
+        // this.shareScreenBtn = document.getElementById('shareScreenBtn');
+        // this.stopSharingBtn = document.getElementById('stopSharingBtn');
+        // this.leaveRoomBtn = document.getElementById('leaveRoomBtn'); // Still used by new hangupBtn logic
+        // this.toggleCameraBtn = document.getElementById('toggleCameraBtn'); // Old button
+        // this.toggleMicBtn = document.getElementById('toggleMicBtn'); // Old button
         this.localVideo = document.getElementById('localVideo');
-        this.toggleCameraBtn = document.getElementById('toggleCameraBtn');
-        this.toggleMicBtn = document.getElementById('toggleMicBtn');
+
+        // New control bar buttons
+        this.micBtn = document.getElementById('micBtn');
+        this.cameraBtn = document.getElementById('cameraBtn');
+        this.presentBtn = document.getElementById('presentBtn');
+        this.hangupBtn = document.getElementById('hangupBtn');
+
 
         // Tutor elements
         this.tutorLeaveBtn = document.getElementById('tutorLeaveBtn');
@@ -46,12 +55,20 @@ class ScreenSharingApp {
 
     bindEvents() {
         this.joinBtn.addEventListener('click', () => this.joinRoom());
-        this.shareScreenBtn.addEventListener('click', () => this.startScreenShare());
-        this.stopSharingBtn.addEventListener('click', () => this.stopScreenShare());
-        this.leaveRoomBtn.addEventListener('click', () => this.leaveRoom());
+        // Old button listeners (commented out/removed)
+        // if (this.shareScreenBtn) this.shareScreenBtn.addEventListener('click', () => this.startScreenShare());
+        // if (this.stopSharingBtn) this.stopSharingBtn.addEventListener('click', () => this.stopScreenShare());
+        // if (this.leaveRoomBtn) this.leaveRoomBtn.addEventListener('click', () => this.leaveRoom()); // Now hangupBtn
+        // if (this.toggleCameraBtn) this.toggleCameraBtn.addEventListener('click', () => this.toggleCamera());
+        // if (this.toggleMicBtn) this.toggleMicBtn.addEventListener('click', () => this.toggleMicrophone());
+
+        // New control bar button listeners
+        if (this.micBtn) this.micBtn.addEventListener('click', () => this.toggleMicrophone());
+        if (this.cameraBtn) this.cameraBtn.addEventListener('click', () => this.toggleCamera());
+        if (this.presentBtn) this.presentBtn.addEventListener('click', () => this.togglePresentation());
+        if (this.hangupBtn) this.hangupBtn.addEventListener('click', () => this.leaveRoom());
+
         this.tutorLeaveBtn.addEventListener('click', () => this.leaveRoom());
-        if (this.toggleCameraBtn) this.toggleCameraBtn.addEventListener('click', () => this.toggleCamera());
-        if (this.toggleMicBtn) this.toggleMicBtn.addEventListener('click', () => this.toggleMicrophone());
 
 
         // Handle user type change
@@ -259,9 +276,10 @@ class ScreenSharingApp {
             if (!acquiredScreen && !acquiredUserMedia) {
                 console.error(`[STUDENT][DEBUG Share #${currentShareAttempt}] Failed to acquire any media stream.`);
                 this.updateStatus('Failed to acquire any media. Please check permissions.');
-                this.shareScreenBtn.style.display = 'inline-block'; // Ensure button is visible again
-                this.stopSharingBtn.style.display = 'none';
-                return; // Exit if no streams were acquired
+                // this.shareScreenBtn.style.display = 'inline-block'; // Old button
+                // this.stopSharingBtn.style.display = 'none'; // Old button
+                this.updateControlBarButtonStates(); // Reset to default
+                return;
             }
 
             this.combinedStream = new MediaStream();
@@ -296,10 +314,11 @@ class ScreenSharingApp {
                  this.localVideo.srcObject = null; // No video to preview
             }
             this.localVideo.style.display = (this.localVideo.srcObject) ? 'block' : 'none';
-            
-            this.shareScreenBtn.style.display = 'none';
-            this.stopSharingBtn.style.display = 'inline-block';
-            this.updateMediaToggleButtons();
+
+            // this.shareScreenBtn.style.display = 'none'; // Old button
+            // this.stopSharingBtn.style.display = 'inline-block'; // Old button
+            this.isMediaActive = true;
+            this.updateControlBarButtonStates();
 
 
             this.updateStatus('Media sharing active. Notifying server...');
@@ -361,10 +380,10 @@ class ScreenSharingApp {
 
         this.localVideo.srcObject = null;
         this.localVideo.style.display = 'none';
-        this.shareScreenBtn.style.display = 'inline-block';
-        this.stopSharingBtn.style.display = 'none';
-        if (this.toggleCameraBtn) this.toggleCameraBtn.style.display = 'none';
-        if (this.toggleMicBtn) this.toggleMicBtn.style.display = 'none';
+        // this.shareScreenBtn.style.display = 'inline-block'; // Old button
+        // this.stopSharingBtn.style.display = 'none'; // Old button
+        this.isMediaActive = false;
+        this.updateControlBarButtonStates(); // Update buttons to reflect stopped state
         console.log(`[${this.userType}] UI elements for screen share reset.`);
 
         if (notifyServer) {
@@ -394,58 +413,91 @@ class ScreenSharingApp {
     }
 
     toggleCamera() {
+        const currentShareAttempt = this.shareAttempt;
         if (!this.userMediaStream) {
-            console.warn('[STUDENT] toggleCamera: No userMediaStream to toggle camera.');
+            console.warn(`[STUDENT][DEBUG Share #${currentShareAttempt}] toggleCamera: No userMediaStream to toggle camera.`);
             return;
         }
         const videoTrack = this.userMediaStream.getVideoTracks()[0];
         if (videoTrack) {
             videoTrack.enabled = !videoTrack.enabled;
-            console.log(`[STUDENT] Camera ${videoTrack.enabled ? 'enabled' : 'disabled'}`);
-            this.updateMediaToggleButtons();
+            console.log(`[STUDENT][DEBUG Share #${currentShareAttempt}] Camera ${videoTrack.enabled ? 'ENABLED' : 'DISABLED'}`);
         } else {
-            console.warn('[STUDENT] toggleCamera: No video track found in userMediaStream.');
+            console.warn(`[STUDENT][DEBUG Share #${currentShareAttempt}] toggleCamera: No video track found in userMediaStream.`);
         }
+        this.updateControlBarButtonStates();
     }
 
     toggleMicrophone() {
+        const currentShareAttempt = this.shareAttempt;
         if (!this.userMediaStream) {
-            console.warn('[STUDENT] toggleMicrophone: No userMediaStream to toggle microphone.');
+            console.warn(`[STUDENT][DEBUG Share #${currentShareAttempt}] toggleMicrophone: No userMediaStream to toggle microphone.`);
             return;
         }
         const audioTrack = this.userMediaStream.getAudioTracks()[0];
         if (audioTrack) {
             audioTrack.enabled = !audioTrack.enabled;
-            console.log(`[STUDENT] Microphone ${audioTrack.enabled ? 'enabled' : 'disabled'}`);
-            this.updateMediaToggleButtons();
+            console.log(`[STUDENT][DEBUG Share #${currentShareAttempt}] Microphone ${audioTrack.enabled ? 'ENABLED' : 'DISABLED'}`);
         } else {
-            console.warn('[STUDENT] toggleMicrophone: No audio track found in userMediaStream.');
+            console.warn(`[STUDENT][DEBUG Share #${currentShareAttempt}] toggleMicrophone: No audio track found in userMediaStream.`);
         }
+        this.updateControlBarButtonStates();
     }
 
-    updateMediaToggleButtons() {
-        if (this.userMediaStream && this.toggleCameraBtn && this.toggleMicBtn) {
-            this.toggleCameraBtn.style.display = 'inline-block';
-            this.toggleMicBtn.style.display = 'inline-block';
-
-            const videoTrack = this.userMediaStream.getVideoTracks()[0];
-            if (videoTrack) {
-                this.toggleCameraBtn.textContent = videoTrack.enabled ? 'Camera Off' : 'Camera On';
-            } else {
-                this.toggleCameraBtn.style.display = 'none'; // Hide if no video track
-            }
-
-            const audioTrack = this.userMediaStream.getAudioTracks()[0];
-            if (audioTrack) {
-                this.toggleMicBtn.textContent = audioTrack.enabled ? 'Mute Mic' : 'Unmute Mic';
-            } else {
-                 this.toggleMicBtn.style.display = 'none'; // Hide if no audio track
-            }
+    togglePresentation() {
+        const currentShareAttempt = this.shareAttempt;
+        console.log(`[STUDENT][DEBUG Share #${currentShareAttempt}] togglePresentation called. isMediaActive: ${this.isMediaActive}`);
+        if (this.isMediaActive) {
+            this.stopScreenShare(true); // true to notify server
         } else {
-            if (this.toggleCameraBtn) this.toggleCameraBtn.style.display = 'none';
-            if (this.toggleMicBtn) this.toggleMicBtn.style.display = 'none';
+            this.startScreenShare();
         }
+        // Button states will be updated by stopScreenShare or startScreenShare
     }
+
+    updateControlBarButtonStates() {
+        const currentShareAttempt = this.shareAttempt;
+        // Mic Button
+        if (this.micBtn) {
+            const audioTrack = this.userMediaStream ? this.userMediaStream.getAudioTracks()[0] : null;
+            if (audioTrack && this.isMediaActive) { // Only show as active if media session is active
+                this.micBtn.classList.toggle('mic-on', audioTrack.enabled);
+                this.micBtn.classList.toggle('mic-off', !audioTrack.enabled);
+                this.micBtn.innerHTML = audioTrack.enabled ? '🎤' : '<span style="text-decoration: line-through;">🎤</span>';
+            } else {
+                this.micBtn.classList.remove('mic-on', 'mic-off');
+                this.micBtn.innerHTML = '🎤'; // Default icon
+            }
+        }
+
+        // Camera Button
+        if (this.cameraBtn) {
+            const videoTrack = this.userMediaStream ? this.userMediaStream.getVideoTracks()[0] : null;
+            if (videoTrack && this.isMediaActive) { // Only show as active if media session is active
+                this.cameraBtn.classList.toggle('camera-on', videoTrack.enabled);
+                this.cameraBtn.classList.toggle('camera-off', !videoTrack.enabled);
+                this.cameraBtn.innerHTML = videoTrack.enabled ? '📷' : '<span style="text-decoration: line-through;">📷</span>';
+            } else {
+                this.cameraBtn.classList.remove('camera-on', 'camera-off');
+                this.cameraBtn.innerHTML = '📷'; // Default icon
+            }
+        }
+
+        // Present Button
+        if (this.presentBtn) {
+            if (this.isMediaActive) {
+                this.presentBtn.classList.add('presenting');
+                this.presentBtn.innerHTML = '💻'; // Could change to "Stop" icon or text
+                this.presentBtn.title = "Stop Presenting";
+            } else {
+                this.presentBtn.classList.remove('presenting');
+                this.presentBtn.innerHTML = '💻';
+                this.presentBtn.title = "Start Presenting";
+            }
+        }
+        console.log(`[STUDENT][DEBUG Share #${currentShareAttempt}] Control bar buttons updated. isMediaActive: ${this.isMediaActive}`);
+    }
+
 
     leaveRoom() {
         this.stopScreenShare();
@@ -738,7 +790,7 @@ class ScreenSharingApp {
             console.warn(`[TUTOR][PC ${studentId}][DEBUG] Existing peer connection found while handling new offer. State: ${existingPC.connectionState}, Signaling: ${existingPC.signalingState}. Cleaning up old PC.`);
             this.cleanupPeerConnection(studentId, false);
         }
-        
+
         const peerConnection = await this.createPeerConnection(studentId, false);
         if (!peerConnection) {
             console.error(`[TUTOR][PC ${studentId}][DEBUG] Failed to create peer connection upon receiving offer.`);

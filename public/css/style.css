@@ -26,6 +26,7 @@ body {
     border-radius: 12px;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
     overflow: hidden;
+    position: relative; /* Needed for absolute positioning of control bar */
 }
 
 .screen.active {
@@ -153,12 +154,22 @@ button {
 }
 
 /* Content */
-.content {
+.content { /* General content area */
     padding: 30px;
     min-height: 400px;
 }
 
-.status {
+#student-screen .content { /* Specific to student screen to ensure space for control bar */
+    padding-bottom: 100px;
+}
+
+
+.status { /* Styling for status message, now in header for student */
+    font-size: 16px;
+    color: #ecf0f1;
+}
+
+#tutor-screen .status { /* Original status styling for tutor screen */
     text-align: center;
     padding: 40px;
     font-size: 18px;
@@ -245,11 +256,107 @@ button {
         justify-content: center;
     }
     
-    .content {
+    .content { /* General content padding for mobile */
         padding: 20px;
+    }
+    #student-screen .content { /* student screen specific padding for control bar */
+         padding-bottom: 100px;
     }
     
     .streams-grid {
         grid-template-columns: 1fr;
     }
+}
+
+/* New Media Control Bar Styles */
+.control-bar {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 15px;
+    padding: 10px 20px;
+    background-color: rgba(44, 62, 80, 0.9);
+    border-radius: 30px; /* More rounded for pill shape */
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+    z-index: 100;
+}
+
+.control-button {
+    width: 50px;  /* Fixed width */
+    height: 50px; /* Fixed height */
+    padding: 0; /* Remove padding to rely on width/height for size */
+    border-radius: 50%;
+    background-color: #566573;
+    color: white;
+    font-size: 22px; /* Adjusted for Unicode icons */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    cursor: pointer;
+    transition: background-color 0.2s ease, transform 0.1s ease;
+    outline: none;
+}
+
+.control-button:hover {
+    background-color: #808B96;
+}
+
+.control-button:active {
+    transform: scale(0.95);
+}
+
+/* Specific button styling */
+.control-button-present {
+    background-color: #3498db;
+}
+.control-button-present:hover {
+    background-color: #2980b9;
+}
+
+.control-button-hangup {
+    background-color: #e74c3c;
+}
+.control-button-hangup:hover {
+    background-color: #c0392b;
+}
+
+/* Placeholder active/toggled states - these will be controlled by JS */
+.control-button.mic-on {
+    background-color: #2ecc71;
+}
+.control-button.mic-on:hover {
+    background-color: #27ae60;
+}
+
+.control-button.mic-off {
+    background-color: #f44336;
+}
+.control-button.mic-off:hover {
+    background-color: #d32f2f;
+}
+
+
+.control-button.camera-on {
+    background-color: #2ecc71;
+}
+.control-button.camera-on:hover {
+    background-color: #27ae60;
+}
+
+.control-button.camera-off {
+    background-color: #f44336;
+}
+.control-button.camera-off:hover {
+    background-color: #d32f2f;
+}
+
+
+.control-button-present.presenting {
+    background-color: #e67e22;
+}
+.control-button-present.presenting:hover {
+    background-color: #d35400;
 }
